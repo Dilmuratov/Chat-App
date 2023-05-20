@@ -23,4 +23,4 @@
             android:id="@+id/action_mainFragment_to_signFragment"
             app:destination="@id/signFragment" />
     </fragment>
-</navigation>
+    </navigation>

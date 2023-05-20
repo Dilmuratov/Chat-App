@@ -1,131 +1,105 @@
 package com.example.chatapp
 
-import android.app.ProgressDialog
 import android.os.Bundle
-import android.text.TextUtils
 import android.util.Log
-import android.util.Patterns
 import android.view.View
 import android.widget.Toast
+import androidx.core.widget.addTextChangedListener
 import androidx.fragment.app.Fragment
-import androidx.navigation.fragment.findNavController
 import com.example.chatapp.databinding.FragmentSignBinding
-import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.FirebaseException
+import com.google.firebase.auth.*
+import com.google.firebase.auth.ktx.auth
+import com.google.firebase.ktx.Firebase
+import java.util.concurrent.TimeUnit
 
 class SignFragment : Fragment(R.layout.fragment_sign) {
     private lateinit var binding: FragmentSignBinding
-    private lateinit var progressDialog: ProgressDialog
-    private lateinit var firebaseAuth: FirebaseAuth
-    private var email = ""
-    private var password = ""
-    private var isSignIn = true
+    private lateinit var auth: FirebaseAuth
+    private var storedVerificationId: String? = null
+    private var resendToken: PhoneAuthProvider.ForceResendingToken? = null
+    private var enteredCode: String = ""
+    lateinit var credential: PhoneAuthCredential
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         binding = FragmentSignBinding.bind(view)
-        progressDialog = ProgressDialog(requireContext())
-        firebaseAuth = FirebaseAuth.getInstance()
+        auth = Firebase.auth
 
-        checkUser()
+        binding.btnNext.setOnClickListener {
+            Log.d("TAG", "Clicked")
+            val phoneNumber =
+                binding.etCountryCode.text.toString() + binding.etPhoneNumber.text.toString()
+            sendVerificationCode(phoneNumber)
+        }
 
-        dialog()
-
-        initListener()
-
-        createAccount()
-
-    }
-
-    private fun checkUser() {
-        if (isSignIn) {
-            val firebaseUser = firebaseAuth.currentUser
-            if (firebaseUser != null) {
-                Toast.makeText(requireContext(), "You are already register!", Toast.LENGTH_SHORT).show()
-                findNavController().navigate(R.id.action_signFragment_to_mainFragment)
+        binding.etVerifyingCode.addTextChangedListener {
+            val verCode = it.toString()
+            if (verCode.length == 6) {
+                val credential = PhoneAuthProvider.getCredential(
+                    storedVerificationId ?: "", verCode
+                )
+                signInWithPhoneAuthCredential(credential)
             }
         }
     }
 
-    private fun initListener() {
-        if (isSignIn) {
-            binding.btnLogin.setOnClickListener {
-                validateDate()
-            }
-        }
-    }
+    private fun signInWithPhoneAuthCredential(credential: PhoneAuthCredential) {
+        auth.signInWithCredential(credential)
+            .addOnCompleteListener(requireActivity()) { task ->
+                if (task.isSuccessful) {
+                    // Sign in success, update UI with the signed-in user's information
+                    Log.d("TAG", "signInWithCredential:success")
 
-    private fun validateDate() {
-        if (isSignIn) {
-            email = binding.etEmail.text.toString()
-            password = binding.etPassword.text.toString()
+                    val user = task.result?.user
 
-            if (Patterns.EMAIL_ADDRESS.matcher(email).matches().not()) {
-                binding.etEmail.error = "Invalid email format"
-            } else if (TextUtils.isEmpty(password)) {
-                binding.etPassword.error = "Please enter your password"
-            } else {
-                firebaselogin()
-            }
-        }
-    }
+                    Toast.makeText(context, "Succesfull registered", Toast.LENGTH_SHORT).show()
 
-    private fun firebaselogin() {
-        if (isSignIn) {
-            progressDialog.show()
-            firebaseAuth.signInWithEmailAndPassword(email, password)
-                .addOnSuccessListener {
-                    progressDialog.dismiss()
-                    val firebaseUser = firebaseAuth.currentUser
-                    val email = firebaseUser!!.email
-                    findNavController().navigate(R.id.action_signFragment_to_mainFragment)
-                    Log.d("TTTT", "email: $email")
-                }
-                .addOnFailureListener {
-                    Log.d("TTTT", "Failure")
-                    progressDialog.dismiss()
-                }
-        }
-    }
-
-    private fun dialog() {
-        if (isSignIn) {
-            progressDialog.setTitle("Please wait")
-            progressDialog.setMessage("Loggin in...")
-            progressDialog.setCanceledOnTouchOutside(false)
-        }
-    }
-
-    private fun createAccount(){
-        binding.btnSignUp.setOnClickListener {
-            isSignIn = false
-            if (isSignIn.not()) binding.btnLogin.visibility = View.GONE
-            if (isSignIn.not()) {
-                email = binding.etEmail.text.toString()
-                password = binding.etPassword.text.toString()
-
-                if (Patterns.EMAIL_ADDRESS.matcher(email).matches().not()) {
-                    binding.etEmail.error = "Invalid email format"
-                } else if (TextUtils.isEmpty(password)) {
-                    binding.etPassword.error = "Please enter your password"
                 } else {
-                    firebaseCreateAccount()
+                    // Sign in failed, display a message and update the UI
+                    Log.w("TAG", "signInWithCredential:failure", task.exception)
+                    if (task.exception is FirebaseAuthInvalidCredentialsException) {
+                        // The verification code entered was invalid
+                    }
+                    // Update UI
                 }
             }
-        }
+
     }
 
-    private fun firebaseCreateAccount() {
-        progressDialog.show()
-        firebaseAuth.createUserWithEmailAndPassword(email, password)
-            .addOnSuccessListener {
-                progressDialog.dismiss()
-                val firebaseUser = firebaseAuth.currentUser
-                val email = firebaseUser!!.email
-                findNavController().navigate(R.id.action_signFragment_to_mainFragment)
-                Log.d("TTTT", "email: $email")
-            }
-            .addOnFailureListener {
-                Log.d("TTTT", "Failure")
-                progressDialog.dismiss()
-            }
+    private fun sendVerificationCode(phoneNumber: String) {
+        val options = PhoneAuthOptions.newBuilder(auth)
+            .setPhoneNumber(phoneNumber)
+            .setTimeout(60L, TimeUnit.SECONDS)
+            .setActivity(requireActivity())
+            .setCallbacks(callbacks)
+            .build()
+        PhoneAuthProvider.verifyPhoneNumber(options)
+    }
+
+    private var callbacks = object : PhoneAuthProvider.OnVerificationStateChangedCallbacks() {
+        override fun onVerificationCompleted(credential: PhoneAuthCredential) {
+            Log.d("TAG", "onVerificationCompleted: $credential")
+            signInWithPhoneAuthCredential(credential)
+        }
+
+        override fun onVerificationFailed(e: FirebaseException) {
+            Log.w("TAG", "onVerificationFailed: $e")
+
+        }
+
+        override fun onCodeSent(
+            verificationId: String,
+            token: PhoneAuthProvider.ForceResendingToken
+        ) {
+            Log.d("TAG", "onCodeSent: $verificationId")
+
+            storedVerificationId = verificationId
+            resendToken = token
+        }
+
+        private fun verifyCode(verificationId: String) {
+            enteredCode = "123456"
+            credential = PhoneAuthProvider.getCredential(verificationId, enteredCode)
+        }
     }
 }
