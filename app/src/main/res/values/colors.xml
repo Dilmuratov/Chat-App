@@ -11,4 +11,5 @@
     <!--    Customize colors    -->
     
     <color name="official_color_dark">#1C1C1E</color>
+    <color name="official_color_blue">#0088cc</color>
 </resources>
